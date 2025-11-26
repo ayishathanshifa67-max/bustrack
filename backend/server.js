@@ -4,6 +4,14 @@ const bcrypt = require('bcrypt');
 const cors = require('cors');
 require('dotenv').config();
 
+// Global error handlers to help debugging unexpected exits
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err && err.stack ? err.stack : err);
+});
+process.on('unhandledRejection', (reason, p) => {
+  console.error('Unhandled Rejection at:', p, 'reason:', reason);
+});
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -15,6 +23,15 @@ const pool = mysql.createPool({
   database: process.env.DB_NAME || 'bustrack',
   waitForConnections: true,
   connectionLimit: 10,
+});
+
+// Test connection on startup
+pool.getConnection().then(conn => {
+  console.log('✓ Database connection successful');
+  conn.release();
+}).catch(err => {
+  console.error('✗ Database connection failed:', err.message);
+  console.error('Please ensure MySQL is running and credentials in .env are correct');
 });
 
 // Email alert setup (optional - requires SMTP config in .env)
@@ -173,4 +190,26 @@ app.post('/api/alert/women', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const server = app.listen(PORT, () => {
+  console.log(`✓ Server listening on port ${PORT}`);
+});
+
+// Handle listen errors (e.g., port already in use)
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`✗ Port ${PORT} is already in use. Please free the port or change PORT in .env`);
+  } else {
+    console.error('✗ Server error:', err.message);
+  }
+  process.exit(1);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\nShutting down...');
+  server.close(() => {
+    console.log('Server closed');
+    pool.end();
+    process.exit(0);
+  });
+});
